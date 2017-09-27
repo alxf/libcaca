@@ -22,6 +22,9 @@
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include <X11/keysym.h>
+#if defined HAVE_XFT
+#   include <X11/Xft/Xft.h>
+#endif
 #if defined HAVE_X11_XKBLIB_H
 #   include <X11/XKBlib.h>
 #endif
@@ -52,11 +55,15 @@ struct driver_private
     long int event_mask;
     int font_width, font_height;
     int colors[4096];
-#if defined X_HAVE_UTF8_STRING
+#if defined X_HAVE_UTF8_STRING && !defined HAVE_XFT
     XFontSet font_set;
-#endif
+#elif defined HAVE_XFT
+    XftDraw *draw;
+    XftFont *font_struct;
+#else
     Font font;
     XFontStruct *font_struct;
+#endif
     int font_offset;
     Cursor pointer;
     Atom wm_protocols;
@@ -67,7 +74,7 @@ struct driver_private
     uint32_t max_char;
     int cursor_flags;
     int dirty_cursor_x, dirty_cursor_y;
-#if defined X_HAVE_UTF8_STRING
+#if defined X_HAVE_UTF8_STRING && !defined HAVE_XFT
     XIM im;
     XIC ic;
 #endif
@@ -80,7 +87,7 @@ static int x11_init_graphics(caca_display_t *dp)
 {
     Colormap colormap;
     XSetWindowAttributes x11_winattr;
-#if defined X_HAVE_UTF8_STRING
+#if defined X_HAVE_UTF8_STRING && !defined HAVE_XFT
     XVaNestedList list;
 #endif
     int (*old_error_handler)(Display *, XErrorEvent *);
@@ -136,7 +143,7 @@ static int x11_init_graphics(caca_display_t *dp)
     /* Parse our font list */
     for( ; ; parser++)
     {
-#if defined X_HAVE_UTF8_STRING
+#if defined X_HAVE_UTF8_STRING && !defined HAVE_XFT
         char **missing_charset_list;
         char *def_string;
         int missing_charset_count;
@@ -150,7 +157,7 @@ static int x11_init_graphics(caca_display_t *dp)
             return -1;
         }
 
-#if defined X_HAVE_UTF8_STRING
+#if defined X_HAVE_UTF8_STRING && !defined HAVE_XFT
         dp->drv.p->font_set = XCreateFontSet(dp->drv.p->dpy, *parser,
                                              &missing_charset_list,
                                              &missing_charset_count,
@@ -176,7 +183,10 @@ static int x11_init_graphics(caca_display_t *dp)
         if (dp->drv.p->font_set)
             break;
 #endif
-
+#if defined HAVE_XFT
+        dp->drv.p->font_struct = XftFontOpenName(dp->drv.p->dpy,
+                DefaultScreen(dp->drv.p->dpy),  strdup(*parser));
+#else
         dp->drv.p->font = XLoadFont(dp->drv.p->dpy, *parser);
         if(!dp->drv.p->font)
             continue;
@@ -204,7 +214,7 @@ static int x11_init_graphics(caca_display_t *dp)
              | dp->drv.p->font_struct->max_char_or_byte2;
         if(font_max_char && (font_max_char < dp->drv.p->max_char))
             dp->drv.p->max_char = font_max_char;
-
+#endif
         break;
     }
 
@@ -212,7 +222,7 @@ static int x11_init_graphics(caca_display_t *dp)
     XSetErrorHandler(old_error_handler);
 
     /* Set font width to the largest character in the set */
-#if defined X_HAVE_UTF8_STRING
+#if defined X_HAVE_UTF8_STRING && !defined HAVE_XFT
     if (dp->drv.p->font_set)
     {
         /* Do not trust the fontset, because some fonts may have
@@ -236,7 +246,12 @@ static int x11_init_graphics(caca_display_t *dp)
         dp->drv.p->font_offset = ink.height + ink.y;
     }
     else
-#endif
+#elif HAVE_XFT
+        dp->drv.p->font_width = dp->drv.p->font_struct->max_advance_width;
+        dp->drv.p->font_height = dp->drv.p->font_struct->ascent +
+                                 dp->drv.p->font_struct->descent;
+        dp->drv.p->font_offset = dp->drv.p->font_struct->descent;
+#else
     {
         dp->drv.p->font_width = 0;
         if(dp->drv.p->font_struct->per_char
@@ -260,7 +275,7 @@ static int x11_init_graphics(caca_display_t *dp)
                                   + dp->drv.p->font_struct->max_bounds.descent;
         dp->drv.p->font_offset = dp->drv.p->font_struct->max_bounds.descent;
     }
-
+#endif
     colormap = DefaultColormap(dp->drv.p->dpy, DefaultScreen(dp->drv.p->dpy));
     for(i = 0x000; i < 0x1000; i++)
     {
@@ -300,10 +315,11 @@ static int x11_init_graphics(caca_display_t *dp)
 
     dp->drv.p->gc = XCreateGC(dp->drv.p->dpy, dp->drv.p->window, 0, NULL);
     XSetForeground(dp->drv.p->dpy, dp->drv.p->gc, dp->drv.p->colors[0x888]);
-#if defined X_HAVE_UTF8_STRING
+#if defined X_HAVE_UTF8_STRING && !defined HAVE_XFT
     if (!dp->drv.p->font_set)
-#endif
+#elif !defined HAVE_XFT
         XSetFont(dp->drv.p->dpy, dp->drv.p->gc, dp->drv.p->font);
+#endif
 
     for(;;)
     {
@@ -333,13 +349,18 @@ static int x11_init_graphics(caca_display_t *dp)
                                       height * dp->drv.p->font_height,
                                       DefaultDepth(dp->drv.p->dpy,
                                       DefaultScreen(dp->drv.p->dpy)));
+#if defined HAVE_XFT
+    dp->drv.p->draw = XftDrawCreate(dp->drv.p->dpy, dp->drv.p->pixmap,
+            DefaultVisual(dp->drv.p->dpy, DefaultScreen(dp->drv.p->dpy)),
+            DefaultColormap(dp->drv.p->dpy, DefaultScreen(dp->drv.p->dpy)));
+#endif
     dp->drv.p->pointer = None;
 
     dp->drv.p->cursor_flags = 0;
     dp->drv.p->dirty_cursor_x = -1;
     dp->drv.p->dirty_cursor_y = -1;
 
-#if defined X_HAVE_UTF8_STRING
+#if defined X_HAVE_UTF8_STRING && !defined HAVE_XFT
     list = XVaCreateNestedList(0, XNFontSet, dp->drv.p->font_set, NULL);
     dp->drv.p->im = XOpenIM(dp->drv.p->dpy, NULL, NULL, NULL);
 
@@ -372,16 +393,19 @@ static int x11_end_graphics(caca_display_t *dp)
         XAutoRepeatOn(dp->drv.p->dpy);
 #endif
     XFreePixmap(dp->drv.p->dpy, dp->drv.p->pixmap);
-#if defined X_HAVE_UTF8_STRING
+#if defined X_HAVE_UTF8_STRING && !defined HAVE_XFT
     if (dp->drv.p->font_set)
         XFreeFontSet(dp->drv.p->dpy, dp->drv.p->font_set);
     else
-#endif
+#elif defined HAVE_XFT
+    { XftDrawDestroy(dp->drv.p->draw); }
+#else
         XFreeFont(dp->drv.p->dpy, dp->drv.p->font_struct);
+#endif
     XFreeGC(dp->drv.p->dpy, dp->drv.p->gc);
     XUnmapWindow(dp->drv.p->dpy, dp->drv.p->window);
     XDestroyWindow(dp->drv.p->dpy, dp->drv.p->window);
-#if defined X_HAVE_UTF8_STRING
+#if defined X_HAVE_UTF8_STRING && !defined HAVE_XFT
     XDestroyIC(dp->drv.p->ic);
     XCloseIM(dp->drv.p->im);
 #endif
@@ -540,7 +564,7 @@ static int x11_get_event(caca_display_t *dp, caca_privevent_t *ev)
                             dp->drv.p->event_mask, &xevent) == True)
     {
         KeySym keysym;
-#if defined X_HAVE_UTF8_STRING
+#if defined X_HAVE_UTF8_STRING && !defined HAVE_XFT
         int len;
 #endif
 
@@ -623,7 +647,7 @@ static int x11_get_event(caca_display_t *dp, caca_privevent_t *ev)
         if(XFilterEvent(&xevent, None) == True)
             continue;
 
-#if defined X_HAVE_UTF8_STRING
+#if defined X_HAVE_UTF8_STRING && !defined HAVE_XFT
         len = Xutf8LookupString(dp->drv.p->ic, &xevent.xkey,
                                 ev->data.key.utf8, 8, NULL, NULL);
         ev->data.key.utf8[len] = 0;
@@ -934,7 +958,7 @@ static void x11_put_glyph(caca_display_t *dp, int x, int y, int yoff,
         }
     }
 
-#if defined X_HAVE_UTF8_STRING
+#if defined X_HAVE_UTF8_STRING && !defined HAVE_XFT
     if (dp->drv.p->font_set)
     {
         wchar_t wch = ch;
@@ -943,22 +967,39 @@ static void x11_put_glyph(caca_display_t *dp, int x, int y, int yoff,
     else
 #endif
     {
-        XChar2b ch16;
 
-#if !defined X_HAVE_UTF8_STRING
+#if !defined X_HAVE_UTF8_STRING && !defined HAVE_XFT
         if(ch > dp->drv.p->max_char)
         {
             ch16.byte1 = 0;
             ch16.byte2 = caca_utf32_to_ascii(ch);
         }
         else
-#endif
+#elif defined HAVE_XFT
+        {
+            XRenderColor wit;
+            XftColor cl;
+            uint16_t fg = caca_attr_to_rgb12_fg(attr);
+
+            wit.alpha = ((fg & 0xf000) >> 12) * 0x1111;
+            wit.red = ((fg & 0x0f00) >> 8) * 0x1111;
+            wit.green = ((fg & 0x00f0) >> 4) * 0x1111;
+            wit.blue = (fg & 0x000f) * 0x1111;
+
+            XftColorAllocValue(dp->drv.p->dpy, DefaultVisual(dp->drv.p->dpy, DefaultScreen(dp->drv.p->dpy)), dp->drv.p->pixmap, &wit, &cl);
+            XftDrawString32(dp->drv.p->draw, &cl,
+                dp->drv.p->font_struct, x, yoff, &ch, 1);
+            XftColorFree(dp->drv.p->dpy, DefaultVisual(dp->drv.p->dpy, DefaultScreen(dp->drv.p->dpy)), dp->drv.p->pixmap, &cl);
+        }
+#else
+        XChar2b ch16;
         {
             ch16.byte1 = (uint8_t)(ch >> 8);
             ch16.byte2 = (uint8_t)ch;
         }
 
         XDrawString16(dpy, px, gc, x, yoff, &ch16, 1);
+#endif
     }
 }
 

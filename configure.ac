@@ -70,6 +70,8 @@ AC_ARG_ENABLE(conio,
   [  --enable-conio          DOS conio.h graphics support (autodetected)])
 AC_ARG_ENABLE(x11,
   [  --enable-x11            X11 support (autodetected)])
+AC_ARG_ENABLE(xft,
+  [  --enable-xft            Xft support (autodetected)])
 AC_ARG_ENABLE(gl,
   [  --enable-gl             OpenGL support (autodetected)])
 AC_ARG_ENABLE(cocoa,
@@ -229,6 +231,18 @@ if test "${enable_x11}" != "no"; then
   if test "${ac_cv_my_have_x11}" != "yes" -a "${enable_x11}" = "yes"; then
     AC_MSG_ERROR([cannot find X11 development files])
   fi
+fi
+
+if test "${enable_x11}" != "no" -a "${enable_xft}" != "no"; then
+	ac_cv_my_have_xft="no"
+	AC_CHECK_LIB(Xft, XftFontOpen,
+	 [ac_cv_my_have_xft="yes"
+	  AC_DEFINE(HAVE_XFT, 1, Define to 1 if you have the 'XftFontOpen' function.)
+	 ])
+	if test "${ac_cv_my_have_xft}" = "yes"; then
+		X11_LIBS="${X11_LIBS} -lXft"
+		X11_CFLAGS="${X11_CFLAGS} -I/usr/include/freetype2"
+	fi
 fi
 
 if test "${enable_gl}" != "no"; then
