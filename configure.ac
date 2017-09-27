@@ -234,10 +234,10 @@ if test "${enable_x11}" != "no"; then
 fi
 
 if test "${enable_x11}" != "no" -a "${enable_xft}" != "no"; then
-	ac_cv_my_have_xft="no"
-	AC_CHECK_LIB(Xft, XftFontOpen,
+	ac_cv_my_have_xft="no",
+  PKG_CHECK_MODULES([XFT], [xft],
 	 [ac_cv_my_have_xft="yes"
-	  AC_DEFINE(HAVE_XFT, 1, Define to 1 if you have the 'XftFontOpen' function.)
+	  AC_DEFINE(HAVE_X11_XFT_H, 1, Define to 1 if you have the Xft header.)
 	 ])
 	if test "${ac_cv_my_have_xft}" = "yes"; then
 		X11_LIBS="${X11_LIBS} -lXft"
